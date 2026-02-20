@@ -1,7 +1,12 @@
 {
   "functions": {
-    "api/mcp.js": {
-      "maxDuration": 60
+    "api/mcp.js": { "maxDuration": 60 },
+    "api/oauth-metadata.js": { "maxDuration": 10 }
+  },
+  "rewrites": [
+    {
+      "source": "/.well-known/oauth-authorization-server",
+      "destination": "/api/oauth-metadata"
     }
-  }
+  ]
 }
