@@ -3,8 +3,11 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import pkg from "jsonwebtoken";
 import jwksClient from "jwks-rsa";
+import { widgetHtml } from "./ui.js";
 
 const { verify, decode } = pkg;
+
+const WIDGET_URI = "ui://widget/devis.html";
 
 // ─── Config Auth0 ────────────────────────────────────────────────
 const AUTH0_DOMAIN   = process.env.AUTH0_DOMAIN;
@@ -46,6 +49,16 @@ function createServer() {
     name: "MatDevis",
     version: "1.0.0",
   });
+
+  // Enregistrement de la ressource UI
+  server.registerResource("devis-widget", WIDGET_URI, { mimeType: "text/html;profile=mcp-app" }, async () => ({
+    contents: [{
+      uri: WIDGET_URI,
+      mimeType: "text/html;profile=mcp-app",
+      text: widgetHtml,
+      _meta: { ui: { prefersBorder: true } }
+    }]
+  }));
 
   // ÉTAPE 1a — Véhicule par immatriculation
   server.tool(
@@ -152,18 +165,16 @@ function createServer() {
     }
   );
 
-  // ÉTAPE 5 — Devis final
+  // ÉTAPE 5 — Calcul des données du devis (Data Tool)
   server.tool(
-    "matdevis_devis_final",
-    "Générer le devis final complet",
+    "matdevis_calculer_devis",
+    "Calculer les montants du devis d'assurance",
     {
       marque:                z.string(),
       modele:                z.string(),
       annee:                 z.number().int(),
       carburant:             z.string(),
       valeur_catalogue:      z.number(),
-      date_naissance:        z.string(),
-      date_permis:           z.string(),
       bonus_malus:           z.number(),
       usage:                 z.string(),
       nb_sinistres:          z.number().int(),
@@ -172,7 +183,7 @@ function createServer() {
       assistance_0km:        z.boolean(),
       vehicule_remplacement: z.boolean()
     },
-    async ({ marque, modele, annee, carburant, valeur_catalogue, date_naissance, date_permis, bonus_malus, usage, nb_sinistres, formule, protection_conducteur, assistance_0km, vehicule_remplacement }) => {
+    async ({ marque, modele, annee, carburant, valeur_catalogue, bonus_malus, usage, nb_sinistres, formule, protection_conducteur, assistance_0km, vehicule_remplacement }) => {
       const taux  = formule === "Responsabilité Civile" ? 0.02 : formule === "Tiers" ? 0.03 : formule === "Tiers Plus" ? 0.036 : 0.048;
       let prime   = valeur_catalogue * taux * bonus_malus;
       if (nb_sinistres === 1) prime *= 1.15;
@@ -183,13 +194,48 @@ function createServer() {
       const annuel   = Math.round(prime);
       const mensuel  = Math.round(prime / 12);
       const ref      = `MAT-${Date.now().toString().slice(-8)}`;
+
       return {
+        structuredContent: {
+          marque, modele, annee, carburant, bonus_malus, usage, formule, annuel, mensuel, ref
+        },
         content: [{
           type: "text",
-          text: `\n╔══════════════════════════════════════╗\n║     🚗 DEVIS ASSURANCE AUTOMOBILE    ║\n║           MatDevis Agent IA          ║\n╚══════════════════════════════════════╝\n\n📌 Référence : **${ref}**\n📅 Date : **${new Date().toLocaleDateString("fr-FR")}**\n\n━━━ 🚗 VÉHICULE ━━━━━━━━━━━━━━━━━━━━━\n• ${marque} ${modele} — ${annee} — ${carburant}\n• Valeur catalogue : ${valeur_catalogue.toLocaleString("fr-FR")} €\n\n━━━ 👤 SOUSCRIPTEUR ━━━━━━━━━━━━━━━━━\n• Né(e) le : ${date_naissance}\n• Permis : ${date_permis}\n• Bonus-malus : ${bonus_malus} ${bonus_malus <= 0.8 ? "🏆" : bonus_malus <= 1 ? "✅" : "⚠️"}\n• Usage : ${usage}\n\n━━━ 🛡️ FORMULE : ${formule.toUpperCase()} ━━━━━━━━\n• Protection conducteur : ${protection_conducteur ? "✅ (+45€)" : "❌"}\n• Assistance 0km : ${assistance_0km ? "✅ (+35€)" : "❌"}\n• Véhicule de remplacement : ${vehicule_remplacement ? "✅ (+60€)" : "❌"}\n\n━━━ 💶 TARIFICATION ━━━━━━━━━━━━━━━━━\n  Prime annuelle  : **${annuel} €/an**\n  Prime mensuelle : **${mensuel} €/mois**\n\n✅ Devis valable 30 jours — Réf. **${ref}**\n_MatDevis Agent IA — Non contractuel_`
+          text: `Devis calculé pour ${marque} ${modele} : ${annuel}€/an.`
         }]
       };
     }
+  );
+
+  // ÉTAPE 6 — Afficher le devis final (Render Tool)
+  server.registerTool(
+    "matdevis_afficher_devis",
+    {
+      description: "Afficher l'interface visuelle du devis final. Appelez toujours matdevis_calculer_devis avant pour obtenir les données.",
+      inputSchema: z.object({
+        marque:        z.string(),
+        modele:        z.string(),
+        annee:         z.number().int(),
+        carburant:     z.string(),
+        bonus_malus:   z.number(),
+        usage:         z.string(),
+        formule:       z.string(),
+        annuel:        z.number(),
+        mensuel:       z.number(),
+        ref:           z.string()
+      }),
+      _meta: {
+        ui: { resourceUri: WIDGET_URI },
+        "openai/outputTemplate": WIDGET_URI,
+      }
+    },
+    async (data) => ({
+      structuredContent: data,
+      content: [{
+        type: "text",
+        text: `Affichage du devis ${data.ref} pour ${data.marque} ${data.modele}.`
+      }]
+    })
   );
 
   return server;
