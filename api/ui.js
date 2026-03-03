@@ -157,16 +157,22 @@ export const widgetHtml = `
       }
     }
 
-    // Handle initial data if available via window.openai
-    if (window.openai && window.openai.toolOutput) {
-      render(window.openai.toolOutput);
+    function handleInitialData() {
+      if (window.openai && window.openai.toolOutput) {
+        console.log("Rendering initial toolOutput");
+        render(window.openai.toolOutput);
+      } else if (window.openai && window.openai.toolInput) {
+        console.log("Tool input available, waiting for result...");
+      }
     }
 
-    // Listen for updates
+    // Listen for updates via MCP Apps bridge
     window.addEventListener('message', (event) => {
       if (event.source !== window.parent) return;
       const message = event.data;
       if (!message || message.jsonrpc !== "2.0") return;
+
+      console.log("Received message:", message.method);
 
       if (message.method === "ui/notifications/tool-result") {
         render(message.params?.structuredContent);
@@ -175,8 +181,12 @@ export const widgetHtml = `
 
     // Also listen for Apps SDK specific event
     window.addEventListener('openai:set_globals', (event) => {
+      console.log("Received openai:set_globals");
       render(event.detail?.globals?.toolOutput);
     }, { passive: true });
+
+    // Initial check
+    handleInitialData();
   </script>
 </body>
 </html>
